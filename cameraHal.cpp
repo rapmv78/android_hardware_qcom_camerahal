@@ -26,7 +26,8 @@
 #include <gralloc_priv.h>
 
 #define NO_ERROR 0
-//#define LOGV LOGD
+//#define LOGV LOGI
+#define GRALLOC_USAGE_PMEM_PRIVATE_ADSP GRALLOC_USAGE_PRIVATE_0
 
 struct qcom_mdp_rect {
    uint32_t x; 
@@ -124,7 +125,7 @@ CameraHAL_CopyBuffers_Hw(int srcFd, int destFd,
 
     LOGV("CameraHAL_CopyBuffers_Hw: srcFD:%d destFD:%d srcOffset:%#x"
          " destOffset:%#x x:%d y:%d w:%d h:%d\n", srcFd, destFd, srcOffset,
-         dstOffset, x, y, w, h);
+         destOffset, x, y, w, h);
 
     memset(&blit, 0, sizeof(blit));
     blit.count = 1;
@@ -177,6 +178,9 @@ CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr,
            "offset:%#x size:%#x base:%p\n", previewWidth, previewHeight, 
            (unsigned)offset, size, mHeap != NULL ? mHeap->base() : 0);
 
+      mWindow->set_usage(mWindow,
+                         GRALLOC_USAGE_PMEM_PRIVATE_ADSP |
+                         GRALLOC_USAGE_SW_READ_OFTEN);
       retVal = mWindow->set_buffers_geometry(mWindow,
                                              previewWidth, previewHeight, 
                                              HAL_PIXEL_FORMAT_RGBA_8888);
@@ -184,6 +188,7 @@ CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr,
          int32_t          stride;
          buffer_handle_t *bufHandle = NULL;
 
+         LOGV("CameraHAL_HandlePreviewData: dequeueing buffer\n");
          retVal = mWindow->dequeue_buffer(mWindow, &bufHandle, &stride);
          if (retVal == NO_ERROR) {
             retVal = mWindow->lock_buffer(mWindow, bufHandle);
@@ -195,6 +200,7 @@ CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr,
                                         previewFormat, destFormat, 
                                         0, 0, previewWidth, previewHeight);
                mWindow->enqueue_buffer(mWindow, bufHandle);
+               LOGV("CameraHAL_HandlePreviewData: enqueued buffer\n");
             } else {
                LOGE("CameraHAL_HandlePreviewData: ERROR locking the buffer\n");
                mWindow->cancel_buffer(mWindow, bufHandle);
@@ -296,6 +302,7 @@ CameraHAL_FixupParams(android::CameraParameters &settings)
    const char *preferred_size       = "640x480";
    const char *preview_frame_rates  = "30,27,24,15";
    const char *preferred_frame_rate = "15";
+   const char *frame_rate_range     = "(15,30)";
 
    settings.set(android::CameraParameters::KEY_VIDEO_FRAME_FORMAT,
                 android::CameraParameters::PIXEL_FORMAT_YUV420SP);
@@ -327,6 +334,12 @@ CameraHAL_FixupParams(android::CameraParameters &settings)
    if (!settings.get(android::CameraParameters::KEY_PREVIEW_FRAME_RATE)) {
       settings.set(android::CameraParameters::KEY_PREVIEW_FRAME_RATE,
                    preferred_frame_rate);
+   }
+
+   if (!settings.get(android::CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE)) {
+      LOGD("Setting KEY_PREVIEW_FPS_RANGE: %s\n", frame_rate_range);
+      settings.set(android::CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE,
+                   frame_rate_range);
    }
 }
 
@@ -368,14 +381,22 @@ qcamera_set_callbacks(struct camera_device * device,
 void 
 qcamera_enable_msg_type(struct camera_device * device, int32_t msg_type)
 {
-   LOGV("qcamera_enable_msg_type: msg_type:%d\n", msg_type);
+   LOGV("qcamera_enable_msg_type: msg_type:%#x\n", msg_type);
+   if (msg_type == 0xfff) {
+      msg_type = 0x1ff;
+   } else {
+      msg_type &= ~(CAMERA_MSG_PREVIEW_METADATA | CAMERA_MSG_RAW_IMAGE_NOTIFY);
+   }
    qCamera->enableMsgType(msg_type);
 }
 
 void 
 qcamera_disable_msg_type(struct camera_device * device, int32_t msg_type)
 {
-   LOGV("qcamera_disable_msg_type: msg_type:%d\n", msg_type);
+   LOGV("qcamera_disable_msg_type: msg_type:%#x\n", msg_type);
+   if (msg_type == 0xfff) {
+      msg_type = 0x1ff;
+   }
    qCamera->disableMsgType(msg_type);
 }
 
@@ -392,17 +413,25 @@ qcamera_start_preview(struct camera_device * device)
    LOGV("qcamera_start_preview: Enabling CAMERA_MSG_PREVIEW_FRAME\n");
 
    /* TODO: Remove hack. */
-   qCamera->enableMsgType(CAMERA_MSG_PREVIEW_FRAME);
+   LOGV("qcamera_start_preview: Preview enabled:%d msg enabled:%d\n",
+        qCamera->previewEnabled(),
+        qCamera->msgTypeEnabled(CAMERA_MSG_PREVIEW_FRAME));
+   if (!qCamera->msgTypeEnabled(CAMERA_MSG_PREVIEW_FRAME)) {
+      qCamera->enableMsgType(CAMERA_MSG_PREVIEW_FRAME);
+   }
    return qCamera->startPreview();
 }
 
 void 
 qcamera_stop_preview(struct camera_device * device)
 {
-   LOGV("qcamera_stop_preview:\n");
+   LOGV("qcamera_stop_preview: msgenabled:%d\n",
+        qCamera->msgTypeEnabled(CAMERA_MSG_PREVIEW_FRAME));
 
    /* TODO: Remove hack. */
-   qCamera->disableMsgType(CAMERA_MSG_PREVIEW_FRAME);
+   if (qCamera->msgTypeEnabled(CAMERA_MSG_PREVIEW_FRAME)) {
+      qCamera->disableMsgType(CAMERA_MSG_PREVIEW_FRAME);
+   }
    return qCamera->stopPreview();
 }
 

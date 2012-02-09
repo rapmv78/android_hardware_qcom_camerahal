@@ -159,6 +159,31 @@ CameraHAL_CopyBuffers_Hw(int srcFd, int destFd,
 }
 
 void
+CameraHAL_CopyBuffers_Sw(char *dest, char *src, int size)
+{
+   int       i;
+   int       numWords  = size / sizeof(unsigned);
+   unsigned *srcWords  = (unsigned *)src;
+   unsigned *destWords = (unsigned *)dest;
+
+   for (i = 0; i < numWords; i++) {
+      if ((i % 8) == 0 && (i + 8) < numWords) {
+         __builtin_prefetch(srcWords  + 8, 0, 0);
+         __builtin_prefetch(destWords + 8, 1, 0);
+      }
+      *destWords++ = *srcWords++;
+   }
+   if (__builtin_expect((size - (numWords * sizeof(unsigned))) > 0, 0)) {
+      int numBytes = size - (numWords * sizeof(unsigned));
+      char *destBytes = (char *)destWords;
+      char *srcBytes  = (char *)srcWords;
+      for (i = 0; i < numBytes; i++) {
+         *destBytes++ = *srcBytes++;
+      }
+   }
+}
+
+void
 CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr, 
                             preview_stream_ops_t *mWindow,
                             camera_request_memory getMemory,
@@ -227,7 +252,8 @@ CameraHAL_GenClientData(const android::sp<android::IMemory> &dataPtr,
 
    clientData = reqClientMemory(-1, size, 1, user);
    if (clientData != NULL) {
-      memcpy(clientData->data, (char *)(mHeap->base()) + offset, size);
+      CameraHAL_CopyBuffers_Sw((char *)clientData->data, 
+                               (char *)(mHeap->base()) + offset, size);
    } else {
       LOGV("CameraHAL_GenClientData: ERROR allocating memory from client\n");
    }
@@ -245,7 +271,8 @@ CameraHAL_DataCb(int32_t msg_type, const android::sp<android::IMemory>& dataPtr,
       hwParameters.getPreviewSize(&previewWidth, &previewHeight);
       CameraHAL_HandlePreviewData(dataPtr, mWindow, origCamReqMemory,
                                   previewWidth, previewHeight);
-   } else if (origData_cb != NULL && origCamReqMemory != NULL) {
+   }
+   if (origData_cb != NULL && origCamReqMemory != NULL) {
       camera_memory_t *clientData = CameraHAL_GenClientData(dataPtr,
                                        origCamReqMemory, user);
       if (clientData != NULL) {
@@ -259,7 +286,7 @@ void
 CameraHAL_DataTSCb(nsecs_t timestamp, int32_t msg_type,
                    const android::sp<android::IMemory>& dataPtr, void *user)
 {
-   LOGD("CameraHAL_DataTSCb: timestamp:%lld msg_type:%d user:%p\n",
+   LOGV("CameraHAL_DataTSCb: timestamp:%lld msg_type:%d user:%p\n",
         timestamp /1000, msg_type, user);
 
    if (origDataTS_cb != NULL && origCamReqMemory != NULL) {

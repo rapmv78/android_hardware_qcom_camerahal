@@ -17,8 +17,8 @@ CAMERA_LIB := camera-nexus
 endif
 
 TARGET_GLOBAL_LD_DIRS  += -L$(LOCAL_PATH) -l${CAMERA_LIB}
-LOCAL_SHARED_LIBRARIES := liblog libdl libutils libcamera_client libbinder libcutils libhardware
+LOCAL_SHARED_LIBRARIES := liblog libdl libutils libcamera_client libbinder libcutils libhardware libui
 LOCAL_C_INCLUDES       := frameworks/base/services/ frameworks/base/include
-LOCAL_C_INCLUDES       += hardware/libhardware/include/ hardware/libhardware/modules/gralloc/
+LOCAL_C_INCLUDES       += hardware/libhardware/include/ hardware
 
 include $(BUILD_SHARED_LIBRARY)

@@ -23,19 +23,14 @@
 #include <fcntl.h>
 #include <linux/ioctl.h>
 #include <linux/msm_mdp.h>
+#include <gralloc_priv.h>
 #include <ui/Rect.h>
 #include <ui/GraphicBufferMapper.h>
 #include <dlfcn.h>
 
 #define NO_ERROR 0
 #define GRALLOC_USAGE_PMEM_PRIVATE_ADSP GRALLOC_USAGE_PRIVATE_0
-#define MSM_COPY_HW 1
-#define HWA 1
-#ifdef HWA
-#include "qcom/display/libgralloc/gralloc_priv.h"
-#else
-#include "libhardware/modules/gralloc/gralloc_priv.h"
-#endif
+//#define MSM_COPY_HW 1
 
 //#define LOGV LOGI
 
@@ -70,6 +65,7 @@ struct blitreq {
 };
 
 /* Prototypes and extern functions. */
+//extern "C" android::sp<android::CameraHardwareInterface> openCameraHardware(int id);
 android::sp<android::CameraHardwareInterface> (*LINK_openCameraHardware)(int id);
 int (*LINK_getNumberofCameras)(void);
 void (*LINK_getCameraInfo)(int cameraId, struct camera_info *info);
@@ -246,11 +242,7 @@ CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr,
       ssize_t  offset;
       size_t   size;
       int32_t  previewFormat = MDP_Y_CBCR_H2V2;
-#ifdef HWA
-      int32_t  destFormat    = MDP_RGBX_8888;
-#else
       int32_t  destFormat    = MDP_RGBA_8888;
-#endif
 
       android::status_t retVal;
       android::sp<android::IMemoryHeap> mHeap = dataPtr->getMemory(&offset, 
@@ -261,18 +253,11 @@ CameraHAL_HandlePreviewData(const android::sp<android::IMemory>& dataPtr,
            (unsigned)offset, size, mHeap != NULL ? mHeap->base() : 0);
 
       mWindow->set_usage(mWindow,
-#ifndef HWA
                          GRALLOC_USAGE_PMEM_PRIVATE_ADSP |
-#endif
                          GRALLOC_USAGE_SW_READ_OFTEN);
       retVal = mWindow->set_buffers_geometry(mWindow,
                                              previewWidth, previewHeight, 
-#ifdef HWA
-                                             HAL_PIXEL_FORMAT_RGBX_8888
-#else
-                                             HAL_PIXEL_FORMAT_RGBA_8888
-#endif
-                                             );
+                                             HAL_PIXEL_FORMAT_RGBA_8888);
       if (retVal == NO_ERROR) {
          int32_t          stride;
          buffer_handle_t *bufHandle = NULL;
@@ -365,7 +350,6 @@ CameraHAL_DataCb(int32_t msg_type, const android::sp<android::IMemory>& dataPtr,
       if (clientData != NULL) {
          LOGV("CameraHAL_DataCb: Posting data to client\n");
          origData_cb(msg_type, clientData, 0, NULL, user);
-         clientData->release(clientData);
       }
    }
 }
@@ -385,7 +369,6 @@ CameraHAL_DataTSCb(nsecs_t timestamp, int32_t msg_type,
               systemTime());
          origDataTS_cb(timestamp, msg_type, clientData, 0, user);
          qCamera->releaseRecordingFrame(dataPtr);
-         clientData->release(clientData);
       } else {
          LOGD("CameraHAL_DataTSCb: ERROR allocating memory from client\n");
       }
